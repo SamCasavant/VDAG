@@ -24,25 +24,25 @@ struct VoxData {
 fn main() {
     let mut world = UChunkDag::new();
 
-    // let vox_data_str = fs::read_to_string("assets/torus.json").unwrap();
-    // let vox_data: VoxData = serde_json::from_str(&vox_data_str).unwrap();
-    // let mut count = 0;
-    // for voxel in vox_data.voxels.iter() {
-    //     let pos_coords = Coordinate {
-    //         x: voxel.x.parse::<i16>().unwrap(),
-    //         y: voxel.y.parse::<i16>().unwrap(),
-    //         z: voxel.z.parse::<i16>().unwrap(),
-    //     };
-    //     let neg_coords = Coordinate {
-    //         x: -voxel.x.parse::<i16>().unwrap(),
-    //         y: -voxel.y.parse::<i16>().unwrap(),
-    //         z: -voxel.z.parse::<i16>().unwrap(),
-    //     };
-    //     world.set_pos(pos_coords);
-    //     world.set_pos(neg_coords);
-    //     count += 2;
-    // }
-    // println!("{} voxels", count);
+    let vox_data_str = fs::read_to_string("assets/torus.json").unwrap();
+    let vox_data: VoxData = serde_json::from_str(&vox_data_str).unwrap();
+    let mut count = 0;
+    for voxel in vox_data.voxels.iter() {
+        let pos_coords = Coordinate {
+            x: voxel.x.parse::<i16>().unwrap(),
+            y: voxel.y.parse::<i16>().unwrap(),
+            z: voxel.z.parse::<i16>().unwrap(),
+        };
+        let neg_coords = Coordinate {
+            x: -voxel.x.parse::<i16>().unwrap(),
+            y: -voxel.y.parse::<i16>().unwrap(),
+            z: -voxel.z.parse::<i16>().unwrap(),
+        };
+        world.set_pos(pos_coords);
+        world.set_pos(neg_coords);
+        count += 2;
+    }
+    println!("{} voxels", count);
     world.set_pos(Coordinate { x: 0, y: 0, z: 0 });
 
     let mut compressed = ChunkDAG::new(world);
@@ -58,28 +58,28 @@ fn main() {
             z: 100,
         });
     }
-    // for voxel in vox_data.voxels.iter() {
-    //     let pos_coords = Coordinate {
-    //         x: voxel.x.parse::<i16>().unwrap(),
-    //         y: voxel.y.parse::<i16>().unwrap(),
-    //         z: voxel.z.parse::<i16>().unwrap(),
-    //     };
-    //     let neg_coords = Coordinate {
-    //         x: -voxel.x.parse::<i16>().unwrap(),
-    //         y: -voxel.y.parse::<i16>().unwrap(),
-    //         z: -voxel.z.parse::<i16>().unwrap(),
-    //     };
-    //     assert!(
-    //         compressed.get_pos(pos_coords),
-    //         "Failure at {:?}",
-    //         pos_coords
-    //     );
-    //     assert!(
-    //         compressed.get_pos(neg_coords),
-    //         "Failure at {:?}",
-    //         neg_coords
-    //     );
-    // }
+    for voxel in vox_data.voxels.iter() {
+        let pos_coords = Coordinate {
+            x: voxel.x.parse::<i16>().unwrap(),
+            y: voxel.y.parse::<i16>().unwrap(),
+            z: voxel.z.parse::<i16>().unwrap(),
+        };
+        let neg_coords = Coordinate {
+            x: -voxel.x.parse::<i16>().unwrap(),
+            y: -voxel.y.parse::<i16>().unwrap(),
+            z: -voxel.z.parse::<i16>().unwrap(),
+        };
+        assert!(
+            compressed.get_pos(pos_coords),
+            "Failure at {:?}",
+            pos_coords
+        );
+        assert!(
+            compressed.get_pos(neg_coords),
+            "Failure at {:?}",
+            neg_coords
+        );
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

@@ -1,0 +1,24 @@
+Revert "Revert "First commit""
+
+This reverts commit bd1c33431b1dfcadf0c70b49cc672453427b2e3e.
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Date:      Mon Jan 31 16:06:20 2022 -0500
+#
+# interactive rebase in progress; onto abe898a
+# Last command done (1 command done):
+#    edit 8f64933 removed large file
+# No commands remaining.
+# You are currently splitting a commit while rebasing branch 'master' on 'abe898a'.
+#
+# Changes to be committed:
+#	new file:   .gitignore
+#	new file:   .vscode/launch.json
+#	new file:   Cargo.lock
+#	new file:   Cargo.toml
+#	new file:   assets/EpicCitadel.gltf
+#	new file:   assets/torus.vox
+#	new file:   src/main.rs
+#
