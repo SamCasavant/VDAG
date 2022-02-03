@@ -1,6 +1,6 @@
 #![feature(test)]
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::{collections::HashSet, fs};
 
 #[derive(Serialize, Deserialize)]
 struct Voxel {
@@ -23,6 +23,13 @@ struct VoxData {
 }
 fn main() {
     let mut world = UChunkDag::new();
+    // world.set_pos(Coordinate { x: 1, y: 1, z: 2 });
+    // world.set_pos(Coordinate { x: 1, y: 2, z: 1 });
+    // world.set_pos(Coordinate { x: 1, y: 2, z: 2 });
+    // world.set_pos(Coordinate { x: 2, y: 1, z: 1 });
+    // world.set_pos(Coordinate { x: 2, y: 1, z: 2 });
+    // world.set_pos(Coordinate { x: 2, y: 2, z: 1 });
+    // world.set_pos(Coordinate { x: 2, y: 2, z: 2 });
 
     let vox_data_str = fs::read_to_string("assets/torus.json").unwrap();
     let vox_data: VoxData = serde_json::from_str(&vox_data_str).unwrap();
@@ -38,26 +45,39 @@ fn main() {
             y: -voxel.y.parse::<i16>().unwrap(),
             z: -voxel.z.parse::<i16>().unwrap(),
         };
+        let higher_coords = Coordinate {
+            x: voxel.x.parse::<i16>().unwrap(),
+            y: voxel.y.parse::<i16>().unwrap() * 2,
+            z: voxel.z.parse::<i16>().unwrap(),
+        };
+        let lower_coords = Coordinate {
+            x: voxel.x.parse::<i16>().unwrap(),
+            y: -voxel.y.parse::<i16>().unwrap() * 2,
+            z: voxel.z.parse::<i16>().unwrap(),
+        };
+        world.set_pos(lower_coords);
+        world.set_pos(higher_coords);
         world.set_pos(pos_coords);
         world.set_pos(neg_coords);
-        count += 2;
+        count += 4;
     }
     println!("{} voxels", count);
-    world.set_pos(Coordinate { x: 0, y: 0, z: 0 });
 
-    let mut compressed = ChunkDAG::new(world);
-    for n in 1..=8 {
-        compressed.compress(n);
-    }
-    for x in 0..1000 {
-        compressed.get_pos(Coordinate { x: 0, y: 0, z: 0 });
-        compressed.get_pos(Coordinate { x: 1, y: 1, z: 1 });
-        compressed.get_pos(Coordinate {
-            x: 100,
-            y: 100,
-            z: 100,
-        });
-    }
+    let compressed = ChunkDAG::new(world);
+    println!("Layer4: {:?}", compressed.layer4);
+
+    //println!("{:?}", compressed);
+    // for each in [
+    //     Coordinate { x: 1, y: 1, z: 2 },
+    //     Coordinate { x: 1, y: 2, z: 1 },
+    //     Coordinate { x: 1, y: 2, z: 2 },
+    //     Coordinate { x: 2, y: 1, z: 1 },
+    //     Coordinate { x: 2, y: 1, z: 2 },
+    //     Coordinate { x: 2, y: 2, z: 1 },
+    //     Coordinate { x: 2, y: 2, z: 2 },
+    // ] {
+    //     println!("{}", compressed.get_pos(each));
+    // }
     for voxel in vox_data.voxels.iter() {
         let pos_coords = Coordinate {
             x: voxel.x.parse::<i16>().unwrap(),
@@ -69,6 +89,16 @@ fn main() {
             y: -voxel.y.parse::<i16>().unwrap(),
             z: -voxel.z.parse::<i16>().unwrap(),
         };
+        let higher_coords = Coordinate {
+            x: voxel.x.parse::<i16>().unwrap(),
+            y: voxel.y.parse::<i16>().unwrap() * 2,
+            z: voxel.z.parse::<i16>().unwrap(),
+        };
+        let lower_coords = Coordinate {
+            x: voxel.x.parse::<i16>().unwrap(),
+            y: -voxel.y.parse::<i16>().unwrap() * 2,
+            z: voxel.z.parse::<i16>().unwrap(),
+        };
         assert!(
             compressed.get_pos(pos_coords),
             "Failure at {:?}",
@@ -79,7 +109,25 @@ fn main() {
             "Failure at {:?}",
             neg_coords
         );
+        assert!(
+            compressed.get_pos(higher_coords),
+            "Failure at {:?}",
+            pos_coords
+        );
+        assert!(
+            compressed.get_pos(lower_coords),
+            "Failure at {:?}",
+            neg_coords
+        );
     }
+    for x in -128..128 {
+        for y in -128..128 {
+            for z in -128..128 {
+                compressed.get_pos(Coordinate { x, y, z });
+            }
+        }
+    }
+    println!("(Theoretical) memory usage: {}", compressed.size());
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -104,11 +152,11 @@ pub struct UChunkDag {
     /// By convention, the bottom layer contains u64s which are structured as above. Each bit in these ints represents a single voxel being present or absent.
     /// There are 8^9 u64s, which use ~1 GB before compression. Beyond this point, I would use all my RAM.
     /// Because the u64s represent 64 voxels, this struct can represent 8^11 voxels, a 2048x2048x2048 cube.
-    data: Box<[u64; 134217728]>,
+    data: Vec<u64>, //Box<[u64; 134217728]>,
 }
 impl UChunkDag {
     pub fn new() -> Self {
-        let data = Box::new([0; 134_217_728]);
+        let data = vec![0; 134_217_728]; //Box::new([0; 134_217_728]);
         Self { data }
     }
     pub fn set_pos(&mut self, coords: Coordinate) {
@@ -125,58 +173,61 @@ impl UChunkDag {
     }
 
     fn coords_to_indices(coords: Coordinate) -> (usize, u8) {
-        // TODO: Clean this up
-        let (x, y, z) = (coords.x + 1024, coords.y + 1024, coords.z + 1024);
+        let (x, y, z) = (
+            (coords.x + 1024) as u32,
+            (coords.y + 1024) as u32,
+            (coords.z + 1024) as u32,
+        );
 
-        let xi = (x / 4) as u32;
-        let mut x_index = xi;
-        for n in 1..=10 {
-            x_index += 2u32.pow(3 * (n - 1)) * 6 * (xi / 2u32.pow(n));
+        // Split into first 9 bits / last 2 bits
+        let (mut x_index, mut x_sub_index) = (x / 4, x % 4);
+        let (mut y_index, mut y_sub_index) = (y / 4, y % 4);
+        let (mut z_index, mut z_sub_index) = (z / 4, z % 4);
+
+        // Morton(ish) encoding math
+        for n in 0..=9 {
+            x_index += 8u32.pow(n) * 6 * (x / 2u32.pow(n + 3));
+            y_index += 8u32.pow(n) * 6 * (y / 2u32.pow(n + 3));
+            z_index += 8u32.pow(n) * 6 * (z / 2u32.pow(n + 3));
         }
+        x_sub_index = x_sub_index + 6 * (x_sub_index / 2);
+        y_sub_index = y_sub_index + 6 * (y_sub_index / 2);
+        z_sub_index = z_sub_index + 6 * (z_sub_index / 2);
 
-        let yi = (y / 4) as u32;
-        let mut y_index = 2 * yi;
-        for n in 1..10 {
-            y_index += 2 * (2u32.pow(3 * (n - 1)) * 6 * (yi / 2u32.pow(n)));
-        }
+        // Each increment in y advances the index by 2
+        // Each increment in z advances the index by 4
 
-        let zi = (z / 4) as u32;
-        let mut z_index = 4 * zi;
-        for n in 1..10 {
-            z_index += 4 * (2u32.pow(3 * (n - 1)) * 6 * (zi / 2u32.pow(n)));
-        }
-        let index = (x_index + y_index + z_index) as usize;
+        let index = (x_index + y_index * 2 + z_index * 4) as usize;
 
-        let sub_i_x = x % 4;
-        let sub_i_y = y % 4;
-        let sub_i_z = z % 4;
-        let sub_index_x = sub_i_x + 6 * (sub_i_x / 2);
-        let sub_index_y = 2 * sub_i_y + 12 * (sub_i_y / 2);
-        let sub_index_z = 4 * sub_i_z + 24 * (sub_i_z / 2);
-        let sub_index = (sub_index_x + sub_index_y + sub_index_z) as u8;
+        let sub_index = (x_sub_index + y_sub_index * 2 + z_sub_index * 4) as u8;
 
         (index, sub_index)
     }
 }
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum Axis {
+    X,
+    Y,
+    Z,
+}
+#[derive(Debug, PartialEq, Clone, Copy)]
 struct Reflection {
     x: bool,
     y: bool,
     z: bool,
 }
 impl Reflection {
-    fn to_u8(&self) -> u8 {
+    const fn to_u8(self) -> u8 {
         self.x as u8 | ((self.y as u8) << 1) | ((self.z as u8) << 2)
     }
-    fn from_u8(reflection: u8) -> Self {
+    const fn from_u8(reflection: u8) -> Self {
         Self {
             x: (reflection % 2) != 0,
             y: ((reflection / 2) % 2) != 0,
             z: ((reflection / 4) % 2) != 0,
         }
     }
-    fn reflect_coords(&self, coords: Coordinate) -> Coordinate {
+    const fn reflect_coords(self, coords: Coordinate) -> Coordinate {
         let x = if self.x {
             (-(coords.x as i32) - 1) as i16
         } else {
@@ -194,21 +245,21 @@ impl Reflection {
         };
         Coordinate { x, y, z }
     }
-    fn flip_x(reflection: u8) -> u8 {
+    const fn flip_x(reflection: u8) -> u8 {
         if reflection % 2 == 1 {
             reflection - 1
         } else {
             reflection + 1
         }
     }
-    fn flip_y(reflection: u8) -> u8 {
+    const fn flip_y(reflection: u8) -> u8 {
         if (reflection / 2) % 2 == 1 {
             reflection - 2
         } else {
             reflection + 2
         }
     }
-    fn flip_z(reflection: u8) -> u8 {
+    const fn flip_z(reflection: u8) -> u8 {
         if (reflection / 4) % 2 == 1 {
             reflection - 4
         } else {
@@ -235,37 +286,32 @@ pub struct ChunkDAG {
     //       Or with u16 indices, there are 13 remaining bits.
     layer1: Vec<(u8, u32)>,
     data: Vec<u64>,
+    active_symmetries: HashSet<(u32, Axis)>,
 }
 impl ChunkDAG {
-    fn new(chunk: UChunkDag) -> Self {
-        let leaves = Box::new(
-            chunk
-                .data
-                .iter()
-                .enumerate()
-                .collect::<Vec<(usize, &u64)>>(),
-        );
-        let mut reflected_leaves = Vec::new();
-        for leaf in leaves.iter() {
-            let (reflected, reflection) = Self::least_symmetrical_data(*leaf.1);
-            reflected_leaves.push((leaf.0, reflected, reflection.to_u8()));
+    fn new(mut chunk: UChunkDag) -> Self {
+        let mut leaves = Vec::with_capacity(134_217_728);
+        while let Some(leaf) = chunk.data.pop() {
+            let (reflected, reflection) = Self::least_symmetrical_data(leaf);
+            leaves.push((chunk.data.len() as u32, reflected, reflection.to_u8()));
         }
+        // Free memory formerly used by uncompressed data
+        chunk.data.shrink_to_fit();
 
         // Sort in reverse order so we can pop elements without shifting
-        reflected_leaves.sort_by(|a, b| {
+        leaves.sort_unstable_by(|a, b| {
             if a.1 == b.1 {
                 b.0.cmp(&a.0)
             } else {
                 b.1.cmp(&a.1)
             }
         });
-        let mut layer1_contents = vec![(0, 0); 134_217_728];
+        let mut layer1 = vec![(0, u32::MAX); 134_217_728];
         // Data without duplicates
-        let mut data = Vec::new();
+        let mut data = Vec::with_capacity(128);
 
         println!("Compressing...");
-        while !reflected_leaves.is_empty() {
-            let active_leaf = reflected_leaves.pop().unwrap();
+        while let Some(active_leaf) = leaves.pop() {
             let active_index = match active_leaf.1 {
                 0 => u32::MAX,
                 val => {
@@ -273,15 +319,38 @@ impl ChunkDAG {
                     (data.len() - 1) as u32
                 }
             };
-            layer1_contents[active_leaf.0] = (active_leaf.2, active_index);
-            while !reflected_leaves.is_empty()
-                && reflected_leaves[reflected_leaves.len() - 1].1 == active_leaf.1
-            {
-                let removed = reflected_leaves.pop().unwrap();
-                layer1_contents[removed.0] = (removed.2, active_index);
+            if active_index != u32::MAX {
+                layer1[active_leaf.0 as usize] = (active_leaf.2, active_index);
+            }
+            while !leaves.is_empty() && leaves[leaves.len() - 1].1 == active_leaf.1 {
+                let removed = leaves.pop().unwrap();
+                if active_index != u32::MAX {
+                    layer1[removed.0 as usize] = (removed.2, active_index);
+                }
             }
         }
-        Self {
+        // Data will not grow until a merge, so free extra allocated space
+        data.shrink_to_fit();
+        // Produce a set representing which of the indices into data are self-symmetrical
+        let mut active_symmetries = HashSet::new();
+        for (index, elem) in data.iter().enumerate() {
+            let symmetries = Self::get_symmetries_data(*elem);
+            if symmetries.x {
+                active_symmetries.insert((index as u32, Axis::X));
+            }
+            if symmetries.y {
+                active_symmetries.insert((index as u32, Axis::Y));
+            }
+            if symmetries.z {
+                active_symmetries.insert((index as u32, Axis::Z));
+            }
+        }
+        active_symmetries.insert((u32::MAX, Axis::X));
+        active_symmetries.insert((u32::MAX, Axis::Y));
+        active_symmetries.insert((u32::MAX, Axis::Z));
+        println!("Precompression data symmetries: {:?}", active_symmetries);
+
+        let mut result = Self {
             layer9: Vec::new(),
             layer8: Vec::new(),
             layer7: Vec::new(),
@@ -290,9 +359,59 @@ impl ChunkDAG {
             layer4: Vec::new(),
             layer3: Vec::new(),
             layer2: Vec::new(),
-            layer1: layer1_contents,
+            layer1,
             data,
+            active_symmetries,
+        };
+
+        for layer in 1..=8 {
+            result.compress(layer);
         }
+        result.active_symmetries = HashSet::new();
+        result
+    }
+    fn get_symmetries_data(data: u64) -> Reflection {
+        // Takes a 4x4x4 block of voxel data and returns the axes along which a reflection is identical
+        // Note to self: In my mind, each axis can be treated independently, but I don't have hard proof of this
+        let mut reflection = Reflection {
+            x: false,
+            y: false,
+            z: false,
+        };
+        if Self::reflect_data(
+            data,
+            Reflection {
+                x: true,
+                y: false,
+                z: false,
+            },
+        ) == data
+        {
+            reflection.x = true;
+        }
+        if Self::reflect_data(
+            data,
+            Reflection {
+                x: false,
+                y: true,
+                z: false,
+            },
+        ) == data
+        {
+            reflection.y = true;
+        }
+        if Self::reflect_data(
+            data,
+            Reflection {
+                x: false,
+                y: false,
+                z: true,
+            },
+        ) == data
+        {
+            reflection.z = true;
+        }
+        reflection
     }
     fn least_symmetrical_data(data: u64) -> (u64, Reflection) {
         // Takes a 4x4x4 block of voxel data and returns the reflection with the lowest value
@@ -303,23 +422,17 @@ impl ChunkDAG {
             y: false,
             z: false,
         };
-        for x in [false, true] {
-            for y in [false, true] {
-                for z in [false, true] {
-                    let test = Self::reflect_data(data, Reflection { x, y, z });
-                    if test < min {
-                        min = test;
-                        reflection = Reflection { x, y, z };
-                    }
-                }
+        for axis in 0b001..=0b111 {
+            let test = Self::reflect_data(data, Reflection::from_u8(axis));
+            if test < min {
+                min = test;
+                reflection = Reflection::from_u8(axis);
             }
         }
         (min, reflection)
     }
     fn reflect_data(data: u64, reflection: Reflection) -> u64 {
         // Reflects a 4x4x4 block across a list of axes
-        // TODO: Simplify with math! This can probably be cleaner AND faster
-
         let mut reflected = data;
         if reflection.x {
             // There are 8 regions of 8 bits.
@@ -364,7 +477,7 @@ impl ChunkDAG {
         }
         reflected
     }
-    fn swap_bits(mut data: u64, first: u8, second: u8) -> u64 {
+    const fn swap_bits(mut data: u64, first: u8, second: u8) -> u64 {
         let first_bit = (data >> first) & 1;
         let second_bit = (data >> second) & 1;
         if first_bit != second_bit {
@@ -378,10 +491,6 @@ impl ChunkDAG {
     fn compress(&mut self, layer: u8) {
         // Compresses layer n, producing layer n+1
         let (lower, upper) = match layer {
-            // These two variables have to be assigned in the same statement to
-            // make rust accept that I'm not borrowing the same variable twice,
-            // even though layer is immutable.
-            // THANKS RUST (this code is a little cleaner though, so actually thanks, Rust)
             1 => (&mut self.layer1, &mut self.layer2),
             2 => (&mut self.layer2, &mut self.layer3),
             3 => (&mut self.layer3, &mut self.layer4),
@@ -392,22 +501,19 @@ impl ChunkDAG {
             8 => (&mut self.layer8, &mut self.layer9),
             n => panic!("Can't compress layer {}", n),
         };
-        let lower_chunks: Vec<&[(u8, u32)]> = lower.chunks(8).collect();
 
-        let mut lower_data = Vec::new();
-        for (i, chunk) in lower_chunks.iter().enumerate() {
-            lower_data.push((i, *chunk));
-        }
-
-        let mut reflected_lower_data = Vec::new();
-        for &children in lower_data.iter() {
+        let mut lower_data = Vec::with_capacity(lower.len() / 8);
+        for (i, chunk) in lower.chunks_exact(8).into_iter().enumerate() {
             let (reflected, reflection) =
-                Self::least_symmetrical_nodes(children.1.try_into().unwrap());
-            reflected_lower_data.push((children.0, reflected, reflection.to_u8()));
+                Self::least_symmetrical_nodes(chunk.try_into().unwrap(), &self.active_symmetries);
+            lower_data.push((i, reflected, reflection.to_u8()));
         }
+        // Temporarily free some memory
+        lower.clear();
+        lower.shrink_to_fit();
 
         // Sort in reverse order so we can pop elements without shifting
-        reflected_lower_data.sort_by(|a, b| {
+        lower_data.sort_unstable_by(|a, b| {
             if a.1 == b.1 {
                 if a.2 == b.2 {
                     b.0.cmp(&a.0)
@@ -432,41 +538,105 @@ impl ChunkDAG {
         };
 
         let mut upper_contents = vec![(0, 0); upper_length];
-        // Data without duplicates
-        let mut uniq_lower_chunks: Vec<[(u8, u32); 8]> = Vec::new();
-
+        let mut index = 0_u32;
         println!("Compressing...");
-        while !reflected_lower_data.is_empty() {
-            let active_node = reflected_lower_data.pop().unwrap();
+        // Dedup
+        while let Some(active_node) = lower_data.pop() {
             let empty = [(0, u32::MAX); 8];
             let active_index = match active_node.1 {
                 null if null == empty => u32::MAX,
                 val => {
-                    uniq_lower_chunks.push(val);
-                    (uniq_lower_chunks.len() - 1) as u32
+                    for element in val {
+                        lower.push(element);
+                    }
+                    index += 1;
+                    index - 1
                 }
             };
             upper_contents[active_node.0] = (active_node.2, active_index);
-            while !reflected_lower_data.is_empty()
+            while !lower_data.is_empty()
                 && (
-                    reflected_lower_data[reflected_lower_data.len() - 1].1,
-                    reflected_lower_data[reflected_lower_data.len() - 1].2,
+                    lower_data[lower_data.len() - 1].1,
+                    lower_data[lower_data.len() - 1].2,
                 ) == (active_node.1, active_node.2)
             {
-                let removed = reflected_lower_data.pop().unwrap();
+                let removed = lower_data.pop().unwrap();
                 upper_contents[removed.0] = (removed.2, active_index);
             }
         }
-        let mut lower_contents = Vec::new();
-        for chunk in uniq_lower_chunks.iter() {
-            for element in chunk.iter() {
-                lower_contents.push(*element);
+        lower.shrink_to_fit(); //Release extra capacity, vector will no longer grow until a merge
+
+        let mut active_symmetries = HashSet::new();
+        for (index, chunk) in lower.chunks_exact(8).into_iter().enumerate() {
+            let symmetries =
+                Self::get_symmetries_nodes(chunk.try_into().unwrap(), &self.active_symmetries);
+            if symmetries.x {
+                active_symmetries.insert((index as u32, Axis::X));
+            }
+            if symmetries.y {
+                active_symmetries.insert((index as u32, Axis::Y));
+            }
+            if symmetries.z {
+                active_symmetries.insert((index as u32, Axis::Z));
             }
         }
-        *lower = lower_contents;
+        println!("Node symmetries: {:?}", active_symmetries);
+        self.active_symmetries = active_symmetries;
         *upper = upper_contents;
     }
-    fn least_symmetrical_nodes(nodes: [(u8, u32); 8]) -> ([(u8, u32); 8], Reflection) {
+    fn get_symmetries_nodes(
+        nodes: [(u8, u32); 8],
+        active_symmetries: &HashSet<(u32, Axis)>,
+    ) -> Reflection {
+        // Takes a 4x4x4 block of voxel data and returns the axes along which a reflection is identical
+        // Note to self: In my mind, each axis can be treated independently, but I don't have hard proof of this
+        let mut reflection = Reflection {
+            x: false,
+            y: false,
+            z: false,
+        };
+        if Self::reflect_nodes(
+            nodes,
+            Reflection {
+                x: true,
+                y: false,
+                z: false,
+            },
+            active_symmetries,
+        ) == nodes
+        {
+            reflection.x = true;
+        }
+        if Self::reflect_nodes(
+            nodes,
+            Reflection {
+                x: false,
+                y: true,
+                z: false,
+            },
+            active_symmetries,
+        ) == nodes
+        {
+            reflection.y = true;
+        }
+        if Self::reflect_nodes(
+            nodes,
+            Reflection {
+                x: false,
+                y: false,
+                z: true,
+            },
+            active_symmetries,
+        ) == nodes
+        {
+            reflection.z = true;
+        }
+        reflection
+    }
+    fn least_symmetrical_nodes(
+        nodes: [(u8, u32); 8],
+        active_symmetries: &HashSet<(u32, Axis)>,
+    ) -> ([(u8, u32); 8], Reflection) {
         // Takes a nodes children and returns the lowest (according to however Rust orders slices) similar children by reflection
         let mut min = nodes;
         let mut reflection = Reflection {
@@ -474,232 +644,60 @@ impl ChunkDAG {
             y: false,
             z: false,
         };
-        for x in [false, true] {
-            for y in [false, true] {
-                for z in [false, true] {
-                    let test = Self::reflect_nodes(nodes, Reflection { x, y, z });
-                    if test < min {
-                        min = test;
-                        reflection = Reflection { x, y, z };
-                    }
-                }
+        for axis in 0b001..=0b111 {
+            let test = Self::reflect_nodes(nodes, Reflection::from_u8(axis), active_symmetries);
+            if test < min {
+                min = test;
+                reflection = Reflection::from_u8(axis);
             }
         }
 
         (min, reflection)
     }
-    fn reflect_nodes(nodes: [(u8, u32); 8], reflection: Reflection) -> [(u8, u32); 8] {
+    fn reflect_nodes(
+        nodes: [(u8, u32); 8],
+        reflection: Reflection,
+        active_symmetries: &HashSet<(u32, Axis)>,
+    ) -> [(u8, u32); 8] {
         // Children are ordered like this:
         // (x, y, z) =>
         // [(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0), (0, 0, 1), (1, 0, 1), (0, 1, 1), (1, 1, 1)]
         let mut reflected = nodes;
         if reflection.x {
             // Exchange every pair of values and flip the x reflection bit
-            // TODO: This accounts for one invariant case (empty), make it account for all of them
-            reflected = [
-                (
-                    if reflected[1].1 != u32::MAX {
-                        Reflection::flip_x(reflected[1].0)
-                    } else {
-                        reflected[1].0
-                    },
-                    reflected[1].1,
-                ),
-                (
-                    if reflected[0].1 != u32::MAX {
-                        Reflection::flip_x(reflected[0].0)
-                    } else {
-                        reflected[0].0
-                    },
-                    reflected[0].1,
-                ),
-                (
-                    if reflected[3].1 != u32::MAX {
-                        Reflection::flip_x(reflected[3].0)
-                    } else {
-                        reflected[3].0
-                    },
-                    reflected[3].1,
-                ),
-                (
-                    if reflected[2].1 != u32::MAX {
-                        Reflection::flip_x(reflected[2].0)
-                    } else {
-                        reflected[2].0
-                    },
-                    reflected[2].1,
-                ),
-                (
-                    if reflected[5].1 != u32::MAX {
-                        Reflection::flip_x(reflected[5].0)
-                    } else {
-                        reflected[5].0
-                    },
-                    reflected[5].1,
-                ),
-                (
-                    if reflected[4].1 != u32::MAX {
-                        Reflection::flip_x(reflected[4].0)
-                    } else {
-                        reflected[4].0
-                    },
-                    reflected[4].1,
-                ),
-                (
-                    if reflected[7].1 != u32::MAX {
-                        Reflection::flip_x(reflected[7].0)
-                    } else {
-                        reflected[7].0
-                    },
-                    reflected[7].1,
-                ),
-                (
-                    if reflected[6].1 != u32::MAX {
-                        Reflection::flip_x(reflected[6].0)
-                    } else {
-                        reflected[6].0
-                    },
-                    reflected[6].1,
-                ),
-            ];
+            for index in [0, 2, 4, 6] {
+                reflected.swap(index, index + 1);
+                if !active_symmetries.contains(&(reflected[index].1, Axis::X)) {
+                    reflected[index].0 = Reflection::flip_x(reflected[index].0);
+                };
+                if !active_symmetries.contains(&(reflected[index + 1].1, Axis::X)) {
+                    reflected[index + 1].0 = Reflection::flip_x(reflected[index + 1].0);
+                };
+            }
         }
         if reflection.y {
             // Exchange pairs of (index, index+2) and flip the y reflection bit
-            reflected = [
-                (
-                    if reflected[2].1 != u32::MAX {
-                        Reflection::flip_y(reflected[2].0)
-                    } else {
-                        reflected[2].0
-                    },
-                    reflected[2].1,
-                ),
-                (
-                    if reflected[3].1 != u32::MAX {
-                        Reflection::flip_y(reflected[3].0)
-                    } else {
-                        reflected[3].0
-                    },
-                    reflected[3].1,
-                ),
-                (
-                    if reflected[0].1 != u32::MAX {
-                        Reflection::flip_y(reflected[0].0)
-                    } else {
-                        reflected[0].0
-                    },
-                    reflected[0].1,
-                ),
-                (
-                    if reflected[1].1 != u32::MAX {
-                        Reflection::flip_y(reflected[1].0)
-                    } else {
-                        reflected[1].0
-                    },
-                    reflected[1].1,
-                ),
-                (
-                    if reflected[6].1 != u32::MAX {
-                        Reflection::flip_y(reflected[6].0)
-                    } else {
-                        reflected[6].0
-                    },
-                    reflected[6].1,
-                ),
-                (
-                    if reflected[7].1 != u32::MAX {
-                        Reflection::flip_y(reflected[7].0)
-                    } else {
-                        reflected[7].0
-                    },
-                    reflected[7].1,
-                ),
-                (
-                    if reflected[4].1 != u32::MAX {
-                        Reflection::flip_y(reflected[4].0)
-                    } else {
-                        reflected[4].0
-                    },
-                    reflected[4].1,
-                ),
-                (
-                    if reflected[5].1 != u32::MAX {
-                        Reflection::flip_y(reflected[5].0)
-                    } else {
-                        reflected[5].0
-                    },
-                    reflected[5].1,
-                ),
-            ];
+            for index in [0, 1, 4, 5] {
+                reflected.swap(index, index + 2);
+                if !active_symmetries.contains(&(reflected[index].1, Axis::Y)) {
+                    reflected[index].0 = Reflection::flip_y(reflected[index].0);
+                };
+                if !active_symmetries.contains(&(reflected[index + 2].1, Axis::Y)) {
+                    reflected[index + 2].0 = Reflection::flip_y(reflected[index + 2].0);
+                };
+            }
         }
         if reflection.z {
             // Exchange pairs of (index, index+4) and flip the z reflection bit
-            reflected = [
-                (
-                    if reflected[4].1 != u32::MAX {
-                        Reflection::flip_z(reflected[4].0)
-                    } else {
-                        reflected[4].0
-                    },
-                    reflected[4].1,
-                ),
-                (
-                    if reflected[5].1 != u32::MAX {
-                        Reflection::flip_z(reflected[5].0)
-                    } else {
-                        reflected[5].0
-                    },
-                    reflected[5].1,
-                ),
-                (
-                    if reflected[6].1 != u32::MAX {
-                        Reflection::flip_z(reflected[6].0)
-                    } else {
-                        reflected[6].0
-                    },
-                    reflected[6].1,
-                ),
-                (
-                    if reflected[7].1 != u32::MAX {
-                        Reflection::flip_z(reflected[7].0)
-                    } else {
-                        reflected[7].0
-                    },
-                    reflected[7].1,
-                ),
-                (
-                    if reflected[0].1 != u32::MAX {
-                        Reflection::flip_z(reflected[0].0)
-                    } else {
-                        reflected[0].0
-                    },
-                    reflected[0].1,
-                ),
-                (
-                    if reflected[1].1 != u32::MAX {
-                        Reflection::flip_z(reflected[1].0)
-                    } else {
-                        reflected[1].0
-                    },
-                    reflected[1].1,
-                ),
-                (
-                    if reflected[2].1 != u32::MAX {
-                        Reflection::flip_z(reflected[2].0)
-                    } else {
-                        reflected[2].0
-                    },
-                    reflected[2].1,
-                ),
-                (
-                    if reflected[3].1 != u32::MAX {
-                        Reflection::flip_z(reflected[3].0)
-                    } else {
-                        reflected[3].0
-                    },
-                    reflected[3].1,
-                ),
-            ];
+            for index in [0, 1, 2, 3] {
+                reflected.swap(index, index + 4);
+                if !active_symmetries.contains(&(reflected[index].1, Axis::Z)) {
+                    reflected[index].0 = Reflection::flip_z(reflected[index].0);
+                };
+                if !active_symmetries.contains(&(reflected[index + 4].1, Axis::Z)) {
+                    reflected[index + 4].0 = Reflection::flip_z(reflected[index + 4].0);
+                };
+            }
         }
         reflected
     }
@@ -713,17 +711,16 @@ impl ChunkDAG {
         }
         let mut range = 2i16.pow(10);
         let mut offset;
-        let mut reflection = 0;
+        let mut reflection;
         let mut next_index = 0;
-
-        // Safe because these layers are constructed based on the bounds of the lower layer, so bounds checking is redundant
-        // This buys a 16% speed boost, which will be very valuable in raycasting
 
         for layer in (1..=9).rev() {
             range /= 2;
             let next_offset_coords = Self::coords_to_offset(coords, range);
             offset = next_offset_coords.0;
             coords = next_offset_coords.1;
+            // SAFETY: because these layers are constructed based on the bounds of the lower layer, bounds checking is redundant
+            // This buys a 16% speed boost, which will be very valuable in raycasting
             unsafe {
                 let next_data = match layer {
                     9 => self.layer9.get_unchecked(offset),
@@ -753,17 +750,17 @@ impl ChunkDAG {
         let data = self.data[next_index];
         range /= 2;
 
-        let (offset, coords) = Self::coords_to_offset(coords, range);
+        (offset, coords) = Self::coords_to_offset(coords, range);
         range /= 2;
         let (sub_offset, _coords) = Self::coords_to_offset(coords, range);
 
         data & (1 << (63 - (offset * 8 + sub_offset))) != 0
     }
-    fn coords_to_offset(coords: Coordinate, range: i16) -> (usize, Coordinate) {
+    const fn coords_to_offset(coords: Coordinate, range: i16) -> (usize, Coordinate) {
         // Indices in layer N point to 8 elements in layer N-1.
-        // This function returns a number 0-7 that corresponds to the given coordinates
+        // This function returns an index into those elements that corresponds to the given coordinates
         // and the coordinates updated to their relative value within layer N-1.
-        // Range is the length of a side of the volume represented by layerN.
+        // Range is the length of a side of the volume represented by layerN
         let (mut x, mut y, mut z) = (coords.x, coords.y, coords.z);
         let mut offset = 0;
         if x >= 0 {
@@ -785,6 +782,18 @@ impl ChunkDAG {
             z += range;
         };
         (offset, Coordinate { x, y, z })
+    }
+    fn size(&self) -> usize {
+        return self.data.capacity() * 8
+            + self.layer1.capacity() * 8
+            + self.layer2.capacity() * 8
+            + self.layer3.capacity() * 8
+            + self.layer4.capacity() * 8
+            + self.layer5.capacity() * 8
+            + self.layer6.capacity() * 8
+            + self.layer7.capacity() * 8
+            + self.layer8.capacity() * 8
+            + self.layer9.capacity() * 8;
     }
 }
 
@@ -811,10 +820,7 @@ mod tests {
             world.set_pos(pos_coords);
             world.set_pos(neg_coords);
         }
-        let mut compressed = ChunkDAG::new(world);
-        for n in 1..=8 {
-            compressed.compress(n);
-        }
+        let compressed = ChunkDAG::new(world);
         for voxel in vox_data.voxels.iter() {
             let pos_coords = Coordinate {
                 x: voxel.x.parse::<i16>().unwrap(),
@@ -917,10 +923,7 @@ mod tests {
             world.set_pos(pos_coords);
             world.set_pos(neg_coords);
         }
-        let mut compressed = ChunkDAG::new(world);
-        for n in 1..=8 {
-            compressed.compress(n);
-        }
+        let compressed = ChunkDAG::new(world);
 
         b.iter(|| {
             for x in -128..128 {
@@ -941,6 +944,3 @@ mod tests {
 // 10.234
 // 10.257 ns
 // 10.279
-
-// Coordinate { x: 519, y: 144, z: 0 }
-// Coordinate { x: 1, y: -2, z: -2 }
