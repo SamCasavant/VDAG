@@ -1,0 +1,43 @@
+# VDAG
+
+## Introduction
+
+This is an attempt at implementing a state-of-the-art compressed voxel data structure, as described in a number of papers ([PDFs] [Kampe et al., 2013](https://icg.gwu.edu/sites/g/files/zaxdzs1481/f/downloads/highResolutionSparseVoxelDAGs.pdf), [Careil et al., 2020](https://graphics.tudelft.nl/Publications-new/2020/CBE20/ModifyingCompressedVoxels-main.pdf), [Villanueva et al., 2017](https://jcgt.org/published/0006/02/01/paper.pdf), et al.).
+
+The file assets/torus.json is required to run the program in its current state. It is slightly to big to upload to github, and can be downloaded from here https://drububu.com/miscellaneous/voxelizer/?out=jso at maximum resolution.
+
+## Background
+
+Voxels are a compelling method of storing geometry data in a 3d scene. Sparse Voxel structures improve the memory usage of storing voxel data by storing only present voxels, and otherwise treating every voxel as empty.
+
+One such structure is a Sparse Voxel Octree (binary tree with 8 children at each node), which repeatedly divides a space into 8 octants (ie. 3d quadrants). Octrees also naturally provide level-of-detail benefits, because each higher layer in the tree represents 8x as many voxels, and meta-information about that set of voxels can be used to skip descending into the tree.
+
+A Sparse Voxel Directed Acyclic Graph (SVDAG) further reduces memory usage by recursively deduping layers and storing pointers to only one instance of a leaf or node. A Symmetric SVDAG reduces memory even further by storing 3 bits of reflection data at each node, and storing only one instance of data reflected across the X-, Y-, and/or Z-axis. This can result in very impressive compression ratios, in the neighborhood of 10 voxels per bit.
+
+## Implementation Details
+
+I have achieved a substantially less impressive 0.75 voxels per byte, though that is likely because I am only compressing millions of voxels, instead of the billions in these papers. I am also wasting considerable data that I will eventually use for material information and additional compression.
+
+Because this is experimental, the code is a bit of a mess and is stored in a single file. I periodically reorganize, but most of my focus is on exploring new approaches. This will probably remain the case until I converge on a design that is sufficiently optimal. (I should be making more frequent commits, regardless).
+
+Rather than 8-byte `usize` pointers, 4-byte `u32` indices into layer-vectors are used (and cast into usizes as needed). Some papers use 32-bit pointers to achieve the same result. The SSVDAG paper also uses indices (and takes it a step further, see Future Work below), so I'm comfortable that this a a reasonable approach.
+
+Data on the leaf nodes is stored in a 64-bit number, representing a 4<sup>3</sup> of voxel data. This is by convention, and I am unaware if a different arrangement will give better results.
+
+I am uncertain if sparseness is still useful in these structures, as I believe the total memory usage of empty voxels after compression is quite small. A clear benefit of sparseness is during access (if a node is known to have no children, descending into the tree can be skipped for performance). Raycasting a sparse structure can be done very efficiently. The same effect is produced here by using the index `u32::MAX` to represent an empty node or leaf. No one else has done this, to my knowledge, and that may be for good reason.
+
+## Future Work
+
+In order to construct larger SSVDAGs, due to RAM (ab)usage, I will need to implement a function to merge new data into an existing SSVDAG.
+
+I have not yet tested or seen tests of the effects of adding an additional 3 bits of rotation data, each corresponding to a 90 degree rotation in X, Y, or Z. I suspect this will further reduce memory usage, as the combination of reflections and rotations should cover 6x the number of voxel-subtree orientations.
+
+I will look into the relative gain from each reflection axis, as up-down reflections may be uncommon enough to abandon if that bit can be better used.
+
+Additionally, I would like to explore translations, dilations, and inversion, but I have lower hopes there. I am very curious about the possibility of storing leaf indices higher up in the tree for 2<sup>n</sup> dilation, and using a single bit to store whether that is the case. Alternately, using that bit only to indicate a 2x dilation and skipping a single layer may be preferable. Storing a single bit to invert (swap voxels with empty voxels) the data in the subsequent node may be beneficial, but it's not clear that inverted data is common, and there may be substantial raycasting consequences. I have not yet come up with a useful approach for translations.
+
+Indices can probably be reduced further (into `u16`s), but that will depend on the size and (information-theoretic) complexity of the voxel data being compressed. Static typing in Rust works against me here, and I will be exploring dynamic typing in the future. The SSVDAG paper further reduces index size by storing the index of the most common ~2^n nodes in n bits. Rust may make this prohibitively difficult (but we'll see).
+
+Material information is not yet implemented (and probably won't be until I write some raycasting with which to test it). There are several established approaches to this, and I am yet not sure which ones will be optimal for my use-case.
+
+When I get around to developing a scene for [GroundhogGame](https://github.com/SamCasavant/GroundhogGame), my intention is to use the compression method to my advantage, reusing similar geometry when possible.
